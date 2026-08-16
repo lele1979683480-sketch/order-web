@@ -173,6 +173,7 @@ for ($g = 0; $g -lt $groups.Count; $g++) {
         Invoke-AB @('fill', '#taskRequire', $comments[0])
         Invoke-AB @('fill', '#rateLimit', $rate)
         Invoke-AB @('fill', '#buyNum', $buy)
+        Write-Host ('评论内容: ' + $comments[0])
         Invoke-AB @('upload', '#fs1File', (Join-Path $dir 'sample.jpg'))
         Start-Sleep 4
         $null = Eval-AB $jsClickAdd
@@ -220,6 +221,7 @@ for ($g = 0; $g -lt $groups.Count; $g++) {
         if ($pageReady -notmatch 'ready') { Write-Host '[警告] 预填页加载超时，继续尝试…' }
         Invoke-AB @('fill', '#taskRequire', $comments[$i])
         Invoke-AB @('fill', '#buyNum', $buy)
+        Write-Host ('评论内容: ' + $comments[$i])
         $null = Eval-AB $jsClickAdd
         Start-Sleep 2
         $null = Eval-AB $jsClickOk
@@ -231,3 +233,22 @@ for ($g = 0; $g -lt $groups.Count; $g++) {
 }
 
 Write-Host ('本次运行完成，共创建 ' + $totalCreated + ' 个订单。')
+Write-Host '== 进入持续监控（每 10 秒轮询，发现待审=1 自动终止；要停止监控请在 Actions 页面点 Cancel） =='
+$mCount = 0
+$mFail = 0
+while ($true) {
+    $mCount++
+    $r = Eval-AB $bMon
+    $ts = Get-Date -Format 'HH:mm:ss'
+    if ($r -match 'stopped') {
+        $mFail = 0
+        Write-Host ("[" + $ts + "] 第 " + $mCount + " 轮：发现待审=1订单并已自动终止 -> " + $r)
+    } elseif ($r -match 'scan') {
+        $mFail = 0
+        Write-Host ("[" + $ts + "] 第 " + $mCount + " 轮：无待审=1订单")
+    } else {
+        $mFail++
+        Write-Host ("[" + $ts + "] 第 " + $mCount + " 轮：接口异常")
+    }
+    Start-Sleep 10
+}
