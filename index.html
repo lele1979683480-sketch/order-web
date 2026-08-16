@@ -7,103 +7,172 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: "PingFang SC","Microsoft YaHei",sans-serif; background: #f0f2f5; padding: 14px; }
-  .card { max-width: 560px; margin: 0 auto; background: #fff; border-radius: 14px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  .card { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 14px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
   h1 { font-size: 20px; color: #1677ff; margin-bottom: 4px; }
-  .sub { font-size: 12px; color: #8a919f; margin-bottom: 16px; }
-  label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+  .sub { font-size: 12px; color: #8a919f; margin-bottom: 12px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 12px 0 6px; }
   input, textarea { width: 100%; padding: 10px 12px; border: 1px solid #d9dce0; border-radius: 8px; font-size: 15px; font-family: inherit; }
-  textarea { min-height: 140px; resize: vertical; line-height: 1.6; }
-  .btn { width: 100%; padding: 13px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 16px; }
+  textarea { min-height: 100px; resize: vertical; line-height: 1.6; }
+  .grp { border: 1px solid #e3e6eb; border-radius: 10px; padding: 12px; margin-top: 12px; background: #fafbfc; }
+  .grp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .grp-head b { color: #333; font-size: 14px; }
+  .del { background: #fff; color: #e04545; border: 1px solid #e04545; border-radius: 6px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+  .add { width: 100%; padding: 10px; border: 1px dashed #1677ff; background: #fff; color: #1677ff; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 12px; }
+  .btn { width: 100%; padding: 13px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 12px; }
   .btn-run { background: #1677ff; color: #fff; }
   .btn-run:disabled { background: #a0c6ff; }
-  .status { margin-top: 12px; font-size: 13px; white-space: pre-wrap; line-height: 1.7; word-break: break-all; }
-  .ok { color: #237804; } .err { color: #cf1322; }
+  .box { margin-top: 12px; border: 1px solid #e3e6eb; border-radius: 10px; padding: 10px; background: #0f1419; color: #d7dde3; font-size: 12px; font-family: Consolas,Menlo,monospace; line-height: 1.7; max-height: 320px; overflow-y: auto; white-space: pre-wrap; word-break: break-all; }
+  .ok { color: #4cd964; } .err { color: #ff6b6b; } .warn { color: #ffcc00; }
   .note { font-size: 12px; color: #8a919f; margin-top: 4px; }
 </style>
 </head>
 <body>
 <div class="card">
   <h1>订单工具 · 手机版</h1>
-  <div class="sub">填好链接和评论，点提交即自动下单并监控（待审=1 自动终止）。</div>
+  <div class="sub">多链接多组：每组填链接+评论，可指定初始订单；点提交自动下单并监控（待审=1 自动终止）。</div>
 
   <label>GitHub 令牌（Token，只需填一次，浏览器自动记住）</label>
   <input id="token" type="password" placeholder="ghp_ 或 github_pat_ 开头">
-  <div class="note">在 github.com → Settings → Developer settings → Tokens(classic) 生成，勾选 repo 和 workflow</div>
+  <div class="note">github.com → Settings → Developer settings → Tokens(classic)，勾选 repo 和 workflow</div>
 
-  <label>视频号链接（必填）</label>
-  <input id="link" placeholder="https://weixin.qq.com/sph/xxx">
-
-  <label>评论列表（每行一条）</label>
-  <textarea id="comments" placeholder="评论1&#10;评论2&#10;评论3"></textarea>
-
-  <label>初始订单 ID（可选，基于它再下一单）</label>
-  <input id="startid" placeholder="留空则自动创建第 1 条">
+  <div id="groups"></div>
+  <button class="add" onclick="addGroup()">+ 添加一组（链接+评论）</button>
 
   <button class="btn btn-run" id="btn" onclick="doSubmit()">提交并运行</button>
-  <div class="status" id="status"></div>
+  <div class="box" id="log"></div>
 </div>
 
 <script>
 var REPO = 'lele1979683480-sketch/order-auto';
 var WF = 'run.yml';
+var grpSeq = 0;
 document.getElementById('token').value = localStorage.getItem('ordertool_token') || '';
-function saveToken(){ localStorage.setItem('ordertool_token', document.getElementById('token').value.trim()); }
+
+function L(msg, cls){
+  var el = document.getElementById('log');
+  el.innerHTML += '<span class="' + (cls||'') + '">' + msg + '</span>\n';
+  el.scrollTop = el.scrollHeight;
+}
+function addGroup(){
+  grpSeq++;
+  var d = document.createElement('div');
+  d.className = 'grp';
+  d.innerHTML =
+    '<div class="grp-head"><b>组 ' + grpSeq + '</b><button class="del" onclick="this.parentNode.parentNode.parentNode.removeChild(this.parentNode.parentNode)">删除</button></div>' +
+    '<label>视频号链接</label><input class="g-link" placeholder="https://weixin.qq.com/sph/xxx">' +
+    '<label>评论列表（每行一条）</label><textarea class="g-comments" placeholder="评论1&#10;评论2"></textarea>' +
+    '<label>初始订单 ID（可选，基于它再下一单）</label><input class="g-start" placeholder="留空则自动创建第 1 条">';
+  document.getElementById('groups').appendChild(d);
+}
+function cleanComment(s){
+  s = s.replace(/^\s+|\s+$/g, '');
+  s = s.replace(/^\d+[.、\u3001\s]*/, '');
+  return s.replace(/^\s+|\s+$/g, '');
+}
 function api(path, method, body){
   var token = document.getElementById('token').value.trim();
   return fetch('https://api.github.com' + path, {
     method: method || 'GET',
     headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined
-  }).then(function(r){ return r.json().then(function(j){ return { status: r.status, json: j }; }); });
+  }).then(function(r){
+    if (r.status === 204) return { status: 204, json: {} };
+    return r.json().then(function(j){ return { status: r.status, json: j }; }).catch(function(){ return { status: r.status, json: {} }; });
+  });
 }
 function base64utf8(s){ return btoa(unescape(encodeURIComponent(s))); }
-function cleanComment(s){
-  s = s.replace(/^\s+|\s+$/g, '');
-  s = s.replace(/^\d+[.、\u3001\s]*/, '');
-  return s.replace(/^\s+|\s+$/g, '');
-}
-function log(msg, isErr){ var el = document.getElementById('status'); el.className = 'status ' + (isErr ? 'err' : 'ok'); el.innerText = msg; }
 
 async function doSubmit(){
-  var btn = document.getElementById('btn');
   var token = document.getElementById('token').value.trim();
-  var link = document.getElementById('link').value.replace(/^\s+|\s+$/g, '');
-  var startId = document.getElementById('startid').value.replace(/^\s+|\s+$/g, '');
-  var lines = document.getElementById('comments').value.split('\n');
-  var comments = [];
-  for (var i = 0; i < lines.length; i++) { var c = cleanComment(lines[i]); if (c) comments.push(c); }
+  if (!token) { L('请先填写 GitHub 令牌 Token', 'err'); return; }
+  localStorage.setItem('ordertool_token', token);
 
-  if (!token) { log('请先填写 GitHub 令牌 Token', true); return; }
-  if (!/^https?:\/\//.test(link)) { log('链接无效，需 http 开头', true); return; }
-  if (comments.length === 0) { log('请至少填一条评论', true); return; }
-  saveToken();
+  var groups = document.getElementById('groups').childNodes;
+  var parts = [];
+  var gc = 0;
+  for (var i = 0; i < groups.length; i++) {
+    if (groups[i].nodeType !== 1) continue;
+    var g = groups[i];
+    var link = (g.getElementsByClassName('g-link')[0].value || '').replace(/^\s+|\s+$/g, '');
+    var sid = (g.getElementsByClassName('g-start')[0].value || '').replace(/^\s+|\s+$/g, '');
+    var lines = g.getElementsByClassName('g-comments')[0].value.split('\n');
+    var comments = [];
+    for (var j = 0; j < lines.length; j++) { var c = cleanComment(lines[j]); if (c) comments.push(c); }
+    if (!/^https?:\/\//.test(link)) { L('组 ' + (gc+1) + ' 链接无效（需 http 开头）', 'err'); return; }
+    if (comments.length === 0) { L('组 ' + (gc+1) + ' 没有评论', 'err'); return; }
+    gc++;
+    parts.push('===链接===\n' + link + '\n===评论===\n' + comments.join('\n'));
+    if (sid) parts.push('===起始ID===\n' + sid);
+  }
+  if (gc === 0) { L('请至少填一组（链接+评论）', 'err'); return; }
+  var cfgText = parts.join('\n');
+
+  var btn = document.getElementById('btn');
   btn.disabled = true;
-  btn.innerText = '正在提交…';
-  log('正在保存配置并触发运行…');
+  btn.innerText = '提交中…';
+  L('提交 ' + gc + ' 组配置…');
 
   try {
-    // 1. 读取当前配置文件拿 sha
     var cur = await api('/repos/' + REPO + '/contents/order_config_multi.txt');
-    if (cur.status !== 200) { log('读取配置失败：' + JSON.stringify(cur.json.message), true); btn.disabled = false; btn.innerText = '提交并运行'; return; }
-    // 2. 生成新配置并写入
-    var cfg = '===链接===\n' + link + '\n===评论===\n' + comments.join('\n');
-    if (startId) { cfg += '\n===起始ID===\n' + startId; }
-    var put = await api('/repos/' + REPO + '/contents/order_config_multi.txt', 'PUT', {
-      message: '手机端更新配置',
-      content: base64utf8(cfg),
-      sha: cur.json.sha
-    });
-    if (put.status !== 200 && put.status !== 201) { log('写入配置失败：' + JSON.stringify(put.json.message), true); btn.disabled = false; btn.innerText = '提交并运行'; return; }
-    // 3. 触发运行
+    if (cur.status !== 200) { L('读取配置失败：' + JSON.stringify(cur.json.message || cur.json), 'err'); btn.disabled = false; btn.innerText = '提交并运行'; return; }
+    var put = await api('/repos/' + REPO + '/contents/order_config_multi.txt', 'PUT', { message: '手机端更新配置', content: base64utf8(cfgText), sha: cur.json.sha });
+    if (put.status !== 200 && put.status !== 201) { L('写入配置失败：' + JSON.stringify(put.json.message || put.json), 'err'); btn.disabled = false; btn.innerText = '提交并运行'; return; }
+    L('配置已保存，正在触发运行…', 'ok');
     var disp = await api('/repos/' + REPO + '/actions/workflows/' + WF + '/dispatches', 'POST', { ref: 'main' });
-    if (disp.status !== 204) { log('配置已保存，但触发失败：' + JSON.stringify(disp.json && disp.json.message), true); btn.disabled = false; btn.innerText = '提交并运行'; return; }
-    log('提交成功！已开始自动下单。\n链接：' + link + '\n评论 ' + comments.length + ' 条' + (startId ? '\n起始订单：' + startId : '') + '\n\n约 2~4 分钟后去 GitHub 仓库 Actions 看结果。');
+    if (disp.status !== 204) { L('触发失败：' + JSON.stringify(disp.json.message || disp.json), 'err'); btn.disabled = false; btn.innerText = '提交并运行'; return; }
+    L('已触发运行！开始跟踪日志…', 'ok');
+    btn.innerText = '运行中…';
+    await trackRun(token);
   } catch (e) {
-    log('出错：' + e.message, true);
+    L('出错：' + e.message, 'err');
   }
   btn.disabled = false;
   btn.innerText = '提交并运行';
 }
+
+async function trackRun(token){
+  // 找到最新一次运行
+  var runs = await api('/repos/' + REPO + '/actions/runs?per_page=3');
+  var list = (runs.json.workflow_runs || []).filter(function(r){ return r.name === '自动下单监控'; });
+  if (!list.length) { L('未找到运行记录', 'err'); return; }
+  var run = list[0];
+  var runId = run.id;
+  L('运行号：' + runId, '');
+  // 轮询状态
+  var maxWait = 25; // 最多约 4 分钟
+  for (var k = 0; k < maxWait; k++) {
+    await sleep(10000);
+    var r = await api('/repos/' + REPO + '/actions/runs/' + runId);
+    var st = r.json.status || '';
+    var conc = r.json.conclusion || '';
+    L('…状态：' + st + (conc ? ' / ' + conc : ''));
+    if (st === 'completed') break;
+    if (k >= maxWait - 1) { L('等待超时，请稍后到 Actions 页面查看', 'warn'); return; }
+  }
+  // 拉日志
+  await sleep(5000);
+  var jobs = await api('/repos/' + REPO + '/actions/runs/' + runId + '/jobs');
+  var job = (jobs.json.jobs || [])[0];
+  if (!job) { L('未找到任务', 'err'); return; }
+  var res = await fetch('https://api.github.com/repos/' + REPO + '/actions/jobs/' + job.id + '/logs', {
+    headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github+json' }
+  });
+  var text = res.status === 200 ? await res.text() : ('获取日志失败（' + res.status + '）');
+  L('---- 运行结果 ----', 'warn');
+  var lines = text.split('\n');
+  var keep = [];
+  for (var i = 0; i < lines.length; i++) {
+    var t = lines[i];
+    if (/共创建|登录成功|登录失败|组[0-9]|第一个订单 ID|本次运行完成|\[错误\]|\[警告\]|监控终止/.test(t)) keep.push(t);
+  }
+  if (!keep.length) keep = lines.slice(-15);
+  for (var j = 0; j < keep.length; j++) {
+    var m = keep[j].replace(/^.*?Z\s*/, '').replace(/^.*?(==|--|=|共|本|第|使用|监控|\[)/, '$1');
+    L(m, /错误/.test(m) ? 'err' : (/警告/.test(m) ? 'warn' : 'ok'));
+  }
+}
+function sleep(ms){ return new Promise(function(res){ setTimeout(res, ms); }); }
+addGroup();
 </script>
 </body>
 </html>
