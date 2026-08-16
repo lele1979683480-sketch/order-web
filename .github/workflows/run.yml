@@ -1,0 +1,32 @@
+name: 自动下单监控
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */2 * * *'
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      MY_ACCOUNT: ${{ secrets.ACCOUNT }}
+      MY_PASSWORD: ${{ secrets.PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 agent-browser
+        run: |
+          npm install -g agent-browser
+          echo "$(npm config get prefix)/node_modules/agent-browser/bin" >> $GITHUB_PATH
+
+      - name: 准备浏览器环境
+        run: |
+          echo "AGENT_BROWSER_SOCKET_DIR=$(pwd)/.ab" >> $GITHUB_ENV
+          echo "AGENT_BROWSER_HEADED=false" >> $GITHUB_ENV
+          CHROME=$(which google-chrome 2>/dev/null || which chromium 2>/dev/null || which chromium-browser 2>/dev/null)
+          if [ -n "$CHROME" ]; then echo "AGENT_BROWSER_EXECUTABLE_PATH=$CHROME" >> $GITHUB_ENV; fi
+          echo "AGENT_BROWSER_PROXY=" >> $GITHUB_ENV
+
+      - name: 运行创建+监控
+        run: pwsh -NoProfile -File run_orders.ps1
