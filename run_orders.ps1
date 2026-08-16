@@ -113,6 +113,10 @@ function Login-Once {
     Start-Sleep 18
     $loginUrl = Invoke-AB @('get', 'url')
     if ($loginUrl -notmatch 'login.html') { return $true }
+    # 诊断：抓登录失败时的页面内容
+    $jsDiag = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("(function(){var b=(document.body.innerText||'');return JSON.stringify({url:location.href,tail:b.slice(-180),cap:Array.from(document.querySelectorAll('img')).filter(function(e){var s=e.src||'';return s.indexOf('captcha')>=0||s.indexOf('verify')>=0||s.indexOf('code')>=0;}).length})})()"))
+    $diag = Eval-AB $jsDiag
+    Write-Host ('登录失败诊断: ' + $diag)
     return $false
 }
 
