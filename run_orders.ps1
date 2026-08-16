@@ -98,18 +98,19 @@ function Login-Once {
         if ($loginReady -match 'ready') { break }
     }
     if ($loginReady -match 'ready') { Write-Host '登录框已就绪' } else { Write-Host '[警告] 登录框未出现' }
-    $jsLoginCheck = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("JSON.stringify({u:document.getElementById('un').value,p:document.getElementById('pwd').value})"))
+    $jsLoginCheck = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("JSON.stringify({u:document.getElementById('un').value,pLen:document.getElementById('pwd').value.length})"))
     for ($try = 1; $try -le 3; $try++) {
         Invoke-AB @('find', 'placeholder', '账号 / 手机号', 'fill', $account)
         Invoke-AB @('find', 'placeholder', '密码', 'fill', $password)
-        Start-Sleep 1
+        Start-Sleep 2
         $checkRes = Eval-AB $jsLoginCheck
+        Write-Host ('填写检查: ' + $checkRes)
         if ($checkRes -match [regex]::Escape($account)) { Write-Host '账号已填写'; break }
         Write-Host ('第 ' + $try + ' 次填写失败，重试…')
         Start-Sleep 3
     }
     Invoke-AB @('find', 'role', 'button', 'click', '--name', '登录')
-    Start-Sleep 6
+    Start-Sleep 18
     $loginUrl = Invoke-AB @('get', 'url')
     if ($loginUrl -notmatch 'login.html') { return $true }
     return $false
