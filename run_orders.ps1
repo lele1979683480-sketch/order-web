@@ -37,6 +37,17 @@ try {
 
 # ---------- 读取多链接配置 ----------
 $cfg = Join-Path $dir 'order_config_multi.txt'
+# 手动提交窗口：如果填了链接，用它生成配置（单链接+多条评论）；否则用仓库里的配置文件
+if ($env:INPUT_LINK) {
+    $inComments = @($env:INPUT_COMMENTS -split '\|' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+    if ($inComments.Count -eq 0) {
+        Write-Host '[错误] 手动提交时评论不能为空（多条评论用 | 分隔）'
+        exit 1
+    }
+    $cfgText = "===链接===`r`n" + $env:INPUT_LINK.Trim() + "`r`n===评论===`r`n" + ($inComments -join "`r`n")
+    [IO.File]::WriteAllText($cfg, $cfgText)
+    Write-Host ('使用手动提交的配置（评论 ' + $inComments.Count + ' 条）')
+}
 if (-not (Test-Path $cfg)) {
     Write-Host '[错误] 找不到 order_config_multi.txt'
     exit 1

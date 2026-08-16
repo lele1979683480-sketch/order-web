@@ -2,6 +2,13 @@ name: 自动下单监控
 
 on:
   workflow_dispatch:
+    inputs:
+      link:
+        description: '视频号链接（http 开头）'
+        required: false
+      comments:
+        description: '评论列表，用 | 分隔（如：评论1|评论2|评论3）'
+        required: false
   schedule:
     - cron: '0 */2 * * *'
 
@@ -12,6 +19,8 @@ jobs:
     env:
       MY_ACCOUNT: ${{ secrets.ACCOUNT }}
       MY_PASSWORD: ${{ secrets.PASSWORD }}
+      INPUT_LINK: ${{ github.event.inputs.link }}
+      INPUT_COMMENTS: ${{ github.event.inputs.comments }}
     steps:
       - uses: actions/checkout@v4
 
