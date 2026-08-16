@@ -160,7 +160,7 @@ async function trackRun(token){
           var lines = text.split('\n');
           for (var i = shown; i < lines.length; i++) {
             var t = lines[i];
-            if (/登录|组[0-9]|订单|共创建|本次运行|\[错误\]|\[警告\]|监控|终止/.test(t)) {
+            if (/登录|组[0-9]|订单|评论|共创建|本次运行|\[错误\]|\[警告\]|监控|终止|轮：/.test(t)) {
               var m = t.replace(/^.*?Z\s*/, '').replace(/^.*?(==|--|=|共|本|第|使用|监控|\[)/, '$1');
               L(m, /错误/.test(m) ? 'err' : (/警告/.test(m) ? 'warn' : 'ok'));
             }
