@@ -77,6 +77,7 @@ $jsClickAdd = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([IO.File]
 $jsClickOk  = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([IO.File]::ReadAllText((Join-Path $dir 'clickModalOK2.js'), [Text.Encoding]::UTF8)))
 $jsRow0     = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([IO.File]::ReadAllText((Join-Path $dir 'clickRow0.js'), [Text.Encoding]::UTF8)))
 $jsPageReady = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("(function(){var e=document.getElementById('url');return (e)?'ready':'no'})()"))
+$jsGetUrl = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("location.href"))
 
 # 接口定位起始订单并写入 localStorage
 $jsLocateHead = "(function(id){var xhr=new XMLHttpRequest();xhr.open('POST','/capi/order/orderList',false);xhr.setRequestHeader('Content-Type','application/json; charset=utf-8');xhr.setRequestHeader('login-un',getStorage('un_customer'));xhr.setRequestHeader('login-token',getStorage('token_customer'));xhr.send(JSON.stringify({orderId:id}));var r=JSON.parse(xhr.responseText);var vo=r.result&&r.result.list&&r.result.list[0];if(!vo)return 'not-found';setStorage('add_order_again_info',JSON.stringify(vo));return 'ok:'+vo.id;})('"
@@ -111,7 +112,7 @@ function Login-Once {
     }
     Invoke-AB @('find', 'role', 'button', 'click', '--name', '登录')
     Start-Sleep 18
-    $loginUrl = Invoke-AB @('get', 'url')
+    $loginUrl = Eval-AB $jsGetUrl
     if ($loginUrl -notmatch 'login.html') { return $true }
     # 诊断：抓登录失败时的页面内容
     $jsDiag = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("(function(){var b=(document.body.innerText||'');return JSON.stringify({url:location.href,tail:b.slice(-180),cap:Array.from(document.querySelectorAll('img')).filter(function(e){var s=e.src||'';return s.indexOf('captcha')>=0||s.indexOf('verify')>=0||s.indexOf('code')>=0;}).length})})()"))
@@ -178,7 +179,7 @@ for ($g = 0; $g -lt $groups.Count; $g++) {
         }
         $null = Eval-AB $jsRow0
         Start-Sleep 5
-        $url = Invoke-AB @('get', 'url')
+        $url = Eval-AB $jsGetUrl
         $m = [regex]::Match($url, 'orderId=(\d+)')
         if ($m.Success) { $firstId = $m.Groups[1].Value }
         if ($firstId -eq '') {
