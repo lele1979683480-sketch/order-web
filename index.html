@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>订单工具手机版</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "PingFang SC","Microsoft YaHei",sans-serif; background: #f0f2f5; padding: 14px; }
+  .card { max-width: 560px; margin: 0 auto; background: #fff; border-radius: 14px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  h1 { font-size: 20px; color: #1677ff; margin-bottom: 4px; }
+  .sub { font-size: 12px; color: #8a919f; margin-bottom: 16px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+  input, textarea { width: 100%; padding: 10px 12px; border: 1px solid #d9dce0; border-radius: 8px; font-size: 15px; font-family: inherit; }
+  textarea { min-height: 140px; resize: vertical; line-height: 1.6; }
+  .btn { width: 100%; padding: 13px; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 16px; }
+  .btn-run { background: #1677ff; color: #fff; }
+  .btn-run:disabled { background: #a0c6ff; }
+  .status { margin-top: 12px; font-size: 13px; white-space: pre-wrap; line-height: 1.7; word-break: break-all; }
+  .ok { color: #237804; } .err { color: #cf1322; }
+  .note { font-size: 12px; color: #8a919f; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>订单工具 · 手机版</h1>
+  <div class="sub">填好链接和评论，点提交即自动下单并监控（待审=1 自动终止）。</div>
+
+  <label>GitHub 令牌（Token，只需填一次，浏览器自动记住）</label>
+  <input id="token" type="password" placeholder="ghp_ 或 github_pat_ 开头">
+  <div class="note">在 github.com → Settings → Developer settings → Tokens(classic) 生成，勾选 repo 和 workflow</div>
+
+  <label>视频号链接（必填）</label>
+  <input id="link" placeholder="https://weixin.qq.com/sph/xxx">
+
+  <label>评论列表（每行一条）</label>
+  <textarea id="comments" placeholder="评论1&#10;评论2&#10;评论3"></textarea>
+
+  <label>初始订单 ID（可选，基于它再下一单）</label>
+  <input id="startid" placeholder="留空则自动创建第 1 条">
+
+  <button class="btn btn-run" id="btn" onclick="doSubmit()">提交并运行</button>
+  <div class="status" id="status"></div>
+</div>
+
+<script>
+var REPO = 'lele1979683480-sketch/order-auto';
+var WF = 'run.yml';
+document.getElementById('token').value = localStorage.getItem('ordertool_token') || '';
+function saveToken(){ localStorage.setItem('ordertool_token', document.getElementById('token').value.trim()); }
+function api(path, method, body){
+  var token = document.getElementById('token').value.trim();
+  return fetch('https://api.github.com' + path, {
+    method: method || 'GET',
+    headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  }).then(function(r){ return r.json().then(function(j){ return { status: r.status, json: j }; }); });
+}
+function base64utf8(s){ return btoa(unescape(encodeURIComponent(s))); }
+function cleanComment(s){
+  s = s.replace(/^\s+|\s+$/g, '');
+  s = s.replace(/^\d+[.、\u3001\s]*/, '');
+  return s.replace(/^\s+|\s+$/g, '');
+}
+function log(msg, isErr){ var el = document.getElementById('status'); el.className = 'status ' + (isErr ? 'err' : 'ok'); el.innerText = msg; }
+
+async function doSubmit(){
+  var btn = document.getElementById('btn');
+  var token = document.getElementById('token').value.trim();
+  var link = document.getElementById('link').value.replace(/^\s+|\s+$/g, '');
+  var startId = document.getElementById('startid').value.replace(/^\s+|\s+$/g, '');
+  var lines = document.getElementById('comments').value.split('\n');
+  var comments = [];
+  for (var i = 0; i < lines.length; i++) { var c = cleanComment(lines[i]); if (c) comments.push(c); }
+
+  if (!token) { log('请先填写 GitHub 令牌 Token', true); return; }
+  if (!/^https?:\/\//.test(link)) { log('链接无效，需 http 开头', true); return; }
+  if (comments.length === 0) { log('请至少填一条评论', true); return; }
+  saveToken();
+  btn.disabled = true;
+  btn.innerText = '正在提交…';
+  log('正在保存配置并触发运行…');
+
+  try {
+    // 1. 读取当前配置文件拿 sha
+    var cur = await api('/repos/' + REPO + '/contents/order_config_multi.txt');
+    if (cur.status !== 200) { log('读取配置失败：' + JSON.stringify(cur.json.message), true); btn.disabled = false; btn.innerText = '提交并运行'; return; }
+    // 2. 生成新配置并写入
+    var cfg = '===链接===\n' + link + '\n===评论===\n' + comments.join('\n');
+    if (startId) { cfg += '\n===起始ID===\n' + startId; }
+    var put = await api('/repos/' + REPO + '/contents/order_config_multi.txt', 'PUT', {
+      message: '手机端更新配置',
+      content: base64utf8(cfg),
+      sha: cur.json.sha
+    });
+    if (put.status !== 200 && put.status !== 201) { log('写入配置失败：' + JSON.stringify(put.json.message), true); btn.disabled = false; btn.innerText = '提交并运行'; return; }
+    // 3. 触发运行
+    var disp = await api('/repos/' + REPO + '/actions/workflows/' + WF + '/dispatches', 'POST', { ref: 'main' });
+    if (disp.status !== 204) { log('配置已保存，但触发失败：' + JSON.stringify(disp.json && disp.json.message), true); btn.disabled = false; btn.innerText = '提交并运行'; return; }
+    log('提交成功！已开始自动下单。\n链接：' + link + '\n评论 ' + comments.length + ' 条' + (startId ? '\n起始订单：' + startId : '') + '\n\n约 2~4 分钟后去 GitHub 仓库 Actions 看结果。');
+  } catch (e) {
+    log('出错：' + e.message, true);
+  }
+  btn.disabled = false;
+  btn.innerText = '提交并运行';
+}
+</script>
+</body>
+</html>
