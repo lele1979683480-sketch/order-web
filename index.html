@@ -52,7 +52,10 @@ document.getElementById('token').value = localStorage.getItem('ordertool_token')
 
 function L(msg, cls){
   var el = document.getElementById('log');
-  el.innerHTML += '<span class="' + (cls||'') + '">' + msg + '</span>\n';
+  var line = document.createElement('div');
+  line.className = cls || '';
+  line.textContent = msg;
+  el.appendChild(line);
   el.scrollTop = el.scrollHeight;
 }
 function addGroup(){
@@ -155,38 +158,33 @@ async function trackRun(token){
   if (!list.length) { L('未找到运行记录', 'err'); return; }
   var run = list[0];
   var runId = run.id;
-  L('运行号：' + runId + '，自动下单进行中（约 2~4 分钟），实时进度：', 'warn');
+  L('运行号：' + runId + '，自动下单进行中，实时进度：', 'warn');
   var shown = 0;
-  var lastJobId = '';
-  var maxWait = 25; // 最多约 4 分钟
+  var lastSha = '';
+  var maxWait = 30; // 最多约 5 分钟
   for (var k = 0; k < maxWait; k++) {
     await sleep(10000);
-    var r = await api('/repos/' + REPO + '/actions/runs/' + runId);
-    var st = r.json.status || '';
-    var conc = r.json.conclusion || '';
-    // 实时拉取日志，增量显示进度
+    // 实时读取进度 progress.json
     try {
-      var jobs = await api('/repos/' + REPO + '/actions/runs/' + runId + '/jobs');
-      var job = (jobs.json.jobs || [])[0];
-      if (job && job.id !== lastJobId) { lastJobId = job.id; shown = 0; }
-      if (job) {
-        var res = await fetch('https://api.github.com/repos/' + REPO + '/actions/jobs/' + job.id + '/logs', {
-          headers: { 'Authorization': 'token ' + token, 'Accept': 'application/vnd.github+json' }
-        });
-        if (res.status === 200) {
-          var text = await res.text();
-          var lines = text.split('\n');
-          for (var i = shown; i < lines.length; i++) {
-            var t = lines[i];
-            if (/登录|组[0-9]|订单|评论|共创建|本次运行|\[错误\]|\[警告\]|监控|终止|轮：/.test(t)) {
-              var m = t.replace(/^.*?Z\s*/, '').replace(/^.*?(==|--|=|共|本|第|使用|监控|\[)/, '$1');
-              L(m, /错误/.test(m) ? 'err' : (/警告/.test(m) ? 'warn' : 'ok'));
-            }
+      var p = await api('/repos/' + REPO + '/contents/progress.json');
+      if (p.status === 200) {
+        var raw = (p.json.content || '').replace(/\n/g, '');
+        var txt = decodeURIComponent(escape(atob(raw)));
+        var arr = JSON.parse(txt);
+        if (Array.isArray(arr) && arr.length) {
+          if (p.json.sha !== lastSha) { lastSha = p.json.sha; shown = 0; }
+          for (var i = shown; i < arr.length; i++) {
+            var m = arr[i].m || '';
+            L('[' + (arr[i].t || '') + '] ' + m, /错误/.test(m) ? 'err' : (/监控/.test(m) ? 'warn' : 'ok'));
           }
-          shown = lines.length;
+          shown = arr.length;
         }
       }
     } catch(e) {}
+    // 查运行状态
+    var r = await api('/repos/' + REPO + '/actions/runs/' + runId);
+    var st = r.json.status || '';
+    var conc = r.json.conclusion || '';
     if (st === 'completed') { L('---- 运行结束：' + (conc || st) + ' ----', 'warn'); document.getElementById('btnStop').style.display = 'none'; break; }
     if (k >= maxWait - 1) { L('等待超时，请稍后到 Actions 页面查看', 'warn'); document.getElementById('btnStop').style.display = 'none'; return; }
   }
