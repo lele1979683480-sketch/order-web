@@ -137,6 +137,7 @@ async function doSubmit(){
 }
 
 async function stopRun(){
+  if (!confirm('确定停止运行吗？\n会中断订单创建和监控；已经创建成功的订单保留在平台。')) { return; }
   var token = document.getElementById('token').value.trim();
   if (!token) { L('请先填写 GitHub 令牌 Token', 'err'); return; }
   L('正在停止运行…', 'warn');
