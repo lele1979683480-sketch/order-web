@@ -31,8 +31,8 @@
 ### 第 3 步：配置账号密码（Secrets）
 1. 仓库页面点 **Settings** → 左侧 **Secrets and variables → Actions**
 2. 点 **New repository secret**，分别添加两个：
-   - `ACCOUNT` = 平台账号（19237005617）
-   - `PASSWORD` = 平台密码（Ach18170606823.，结尾有句点）
+   - `ACCOUNT` = 平台账号（在 GitHub Secrets 中配置，仓库公开时勿写明文）
+   - `PASSWORD` = 平台密码（在 GitHub Secrets 中配置，仓库公开时勿写明文）
 
 ### 第 4 步：填订单内容
 - 编辑 `order_config_multi.txt`（点文件 → 铅笔图标编辑 → 保存），格式：
