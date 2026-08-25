@@ -1,0 +1,27 @@
+name: 诊断订单字段
+
+on:
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MY_ACCOUNT: ${{ secrets.ACCOUNT }}
+      MY_PASSWORD: ${{ secrets.PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 agent-browser
+        run: |
+          npm install -g agent-browser
+          echo "$(npm config get prefix)/node_modules/agent-browser/bin" >> $GITHUB_PATH
+
+      - name: 准备浏览器环境
+        run: |
+          echo "AGENT_BROWSER_HEADED=false" >> $GITHUB_ENV
+          echo "AGENT_BROWSER_PROXY=" >> $GITHUB_ENV
+
+      - name: 运行诊断（只查询，不创建）
+        run: pwsh -NoProfile -File diagnose_orders.ps1

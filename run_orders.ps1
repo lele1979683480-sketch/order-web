@@ -5,6 +5,37 @@
 $ErrorActionPreference = 'Continue'
 $dir = $PSScriptRoot
 
+# ---------- 实时进度（写入 progress.json 并周期性推回仓库，供前端实时显示） ----------
+$script:progressArr = @()
+$script:lastPush = Get-Date
+$progressFile = Join-Path $dir 'progress.json'
+$repoEnv = $env:GITHUB_REPOSITORY
+$script:pushUrl = ''
+if ($repoEnv) { $script:pushUrl = "https://x-access-token:$($env:GITHUB_TOKEN)@github.com/$repoEnv.git" }
+function Push-Progress {
+    if (-not $script:pushUrl) { return }
+    try {
+        git -C $dir add -A progress.json 2>$null
+        git -C $dir -c user.name="auto" -c user.email="auto@github.com" -c commit.gpgsign=false commit -m "progress" 2>$null
+        git -C $dir -c http.sslVerify=false push $script:pushUrl HEAD:main 2>&1 | Out-Null
+    } catch {}
+}
+function Add-Progress {
+    param([string]$Msg)
+    $script:progressArr += @{ t = (Get-Date -Format 'HH:mm:ss'); m = $Msg }
+    if ($script:progressArr.Count -gt 200) { $script:progressArr = @($script:progressArr[-200..-1]) }
+    $script:progressArr | ConvertTo-Json -Depth 3 | Set-Content -Path $progressFile -Encoding UTF8
+    $now = Get-Date
+    if (($now - $script:lastPush).TotalSeconds -ge 30 -and $script:pushUrl) {
+        $script:lastPush = $now
+        Push-Progress
+    }
+}
+
+# 每次运行开始：先清空旧进度日志，避免手机端显示上一次的内容
+Add-Progress '开始运行'
+Push-Progress
+
 if (-not $env:MY_ACCOUNT -or -not $env:MY_PASSWORD) {
     Write-Host '[错误] 缺少 MY_ACCOUNT / MY_PASSWORD 环境变量（请在 GitHub Secrets 配置）'
     exit 1
@@ -94,9 +125,59 @@ $jsGetUrl = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("location.h
 $jsLocateHead = "(function(id){var xhr=new XMLHttpRequest();xhr.open('POST','/capi/order/orderList',false);xhr.setRequestHeader('Content-Type','application/json; charset=utf-8');xhr.setRequestHeader('login-un',getStorage('un_customer'));xhr.setRequestHeader('login-token',getStorage('token_customer'));xhr.send(JSON.stringify({orderId:id}));var r=JSON.parse(xhr.responseText);var vo=r.result&&r.result.list&&r.result.list[0];if(!vo)return 'not-found';setStorage('add_order_again_info',JSON.stringify(vo));return 'ok:'+vo.id;})('"
 $jsLocateEnd = "')"
 
-# 接口监控 JS
-$jsMon = "(function(){var out=[];function api(url,data){var xhr=new XMLHttpRequest();xhr.open('POST','/capi'+url,false);xhr.setRequestHeader('Content-Type','application/json; charset=utf-8');xhr.setRequestHeader('login-un',getStorage('un_customer'));xhr.setRequestHeader('login-token',getStorage('token_customer'));xhr.send(JSON.stringify(data));try{return JSON.parse(xhr.responseText);}catch(e){return {code:-1};}}for(var pg=1;pg<=15;pg++){var r=api('/order/orderList',{pageNum:pg,pageSize:20});var list=r.result&&r.result.list||[];if(list.length===0)break;for(var i=0;i<list.length;i++){var v=list[i];if(v.title!=='复制悬赏要求内容评论')continue;var ap=v.auditProgress||'0 / 0';var parts=ap.split('/');var pending=-1;if(parts.length>=2){pending=parseInt(parts[1].trim(),10);if(isNaN(pending))pending=-1;}if(pending===1){var sr=api('/order/stopOrder',{id:v.id});out.push('stopped:'+v.id+(sr.code===0?'(ok)':'(code'+sr.code+')'));}}}return JSON.stringify({action:out});})()"
+# 接口监控 JS（详细版）：待审=submitNum-passNum-notPassNum，>=1 自动终止+二次验证；登录状态检测；分页循环 return 在循环外
+$jsMon = "(function(){var out={total:0,pages:0,found:[],loginOk:true,err:''};var uid=(typeof getStorage==='function'&&getStorage('uid'))||'0';function api(url,data){var xhr=new XMLHttpRequest();xhr.open('POST','/capi'+url,false);xhr.setRequestHeader('Content-Type','application/json; charset=utf-8');xhr.setRequestHeader('Accept','application/json, text/javascript, */*; q=0.01');xhr.setRequestHeader('login-un',getStorage('un_customer'));xhr.setRequestHeader('login-token',getStorage('token_customer'));xhr.setRequestHeader('login-uid',uid);xhr.setRequestHeader('platform',typeof app==='undefined'?0:1);xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');xhr.send(JSON.stringify(data));try{return JSON.parse(xhr.responseText);}catch(e){return {code:-1,raw:xhr.responseText};}}for(var pg=1;pg<=25;pg++){out.pages=pg;var r=api('/order/orderList',{pageNum:pg,pageSize:100});if(r.code!==0||!r.result){var mm=(r.msg||'')+' code='+r.code;if(r.code===50||r.code===401||r.code===403||/登录|token|过期|失效|未登录|授权/i.test(mm)){out.loginOk=false;out.err=mm;}else{out.err='page'+pg+':code'+r.code+' msg='+(r.msg||'');}break;}var list=r.result.list||[];out.total+=list.length;if(list.length===0)break;for(var i=0;i<list.length;i++){var v=list[i];if(v.title!=='复制悬赏要求内容评论')continue;var pend=(parseInt(v.submitNum,10)||0)-(parseInt(v.passNum,10)||0)-(parseInt(v.notPassNum,10)||0);var item={id:v.id,submit:v.submitNum,pass:v.passNum,notPass:v.notPassNum,pend:pend,status:v.orderStatus};if(pend>=1&&v.orderStatus===20){var sr=api('/order/stopOrder',{id:v.id,pageSize:20,pageNum:1});item.stopResp=JSON.stringify(sr);if(sr.code===0){item.stopResult='ok';var wt=Date.now()+1500;while(Date.now()<wt){}var vr=api('/order/orderList',{pageNum:1,pageSize:100});var vl=(vr.result&&vr.result.list)||[];var vv=null;for(var j2=0;j2<vl.length;j2++){if(String(vl[j2].id)===String(v.id)){vv=vl[j2];break;}}item.verify=vv?('status='+vv.orderStatus+',pend='+((vv.submitNum||0)-(vv.passNum||0)-(vv.notPassNum||0))):'not-found';}else{item.stopResult='fail:'+sr.code;}}out.found.push(item);}}return JSON.stringify(out);})()"
 $bMon = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($jsMon))
+
+# ---------- 监控轮询（详细日志 + 进度推送 + 登录状态检测） ----------
+function Invoke-MonitorRound {
+    param([int]$RoundNo, [switch]$IsInCreate)
+    $r = Eval-AB $bMon
+    try { $o = $r | ConvertFrom-Json } catch { $o = $null }
+    # agent-browser eval 返回带引号的 JSON 字符串，需二次解析才能得到对象
+    if ($o -is [string]) { try { $o = $o | ConvertFrom-Json } catch { $o = $null } }
+    $ts = Get-Date -Format 'HH:mm:ss'
+    $tag = if ($IsInCreate) { '创建后监控' } else { '监控' }
+    if ($null -eq $o) {
+        Write-Host ("[" + $ts + "] " + $tag + "：结果解析失败（" + $r + "）")
+        Add-Progress ($tag + ': 结果解析失败')
+        return @{ ok = $false; loginFail = $false }
+    }
+    if (-not $o.loginOk) {
+        Write-Host ("[" + $ts + "] " + $tag + "：登录状态异常 " + $o.err)
+        Add-Progress ($tag + ': 登录状态异常 ' + $o.err)
+        return @{ ok = $true; loginFail = $true }
+    }
+    $log = ("[" + $ts + "] " + $tag + "：查询 " + $o.pages + " 页，共 " + $o.found.Count + " 个目标订单")
+    if ($o.err) { $log += (" | 接口异常:" + $o.err) }
+    # 只取执行中（status=20）且有待审（pending>=1）的订单；已终止订单（status=50）pending 残留但不再处理
+    $pendOrders = @($o.found | Where-Object { $_.pend -ge 1 -and $_.status -eq 20 })
+    if ($pendOrders.Count -eq 0) {
+        $log += "，当前无待审"
+        Write-Host $log
+        Add-Progress ($tag + ': ' + $log)
+        return @{ ok = $true; loginFail = $false }
+    }
+    Write-Host $log
+    Write-Host ("[" + $ts + "] 发现 " + $pendOrders.Count + " 个待审订单")
+    $log += (" | 发现 " + $pendOrders.Count + " 个待审")
+    foreach ($f in $pendOrders) {
+        Write-Host ("[" + $ts + "] 订单ID：" + $f.id + " submit=" + $f.submit + " pass=" + $f.pass + " notPass=" + $f.notPass + " pending=" + $f.pend)
+        Write-Host ("[" + $ts + "] 执行 stopOrder")
+        if ($f.stopResult -eq 'ok') {
+            Write-Host ("[" + $ts + "] stopOrder 响应：code=0")
+            Write-Host ("[" + $ts + "] 二次验证：" + $f.verify)
+            Write-Host ("[" + $ts + "] 自动停止成功")
+            $log += (" | " + $f.id + " 已停止")
+        } else {
+            Write-Host ("[" + $ts + "] stopOrder 响应：" + $f.stopResp)
+            Write-Host ("[" + $ts + "] 停止结果：失败(" + $f.stopResult + ")")
+            $log += (" | " + $f.id + " 停止失败")
+        }
+    }
+    Add-Progress ($tag + ': ' + $log)
+    return @{ ok = $true; loginFail = $false }
+}
 
 # ---------- 登录（带验证和重试） ----------
 function Login-Once {
@@ -136,11 +217,13 @@ $loggedIn = $false
 for ($attempt = 1; $attempt -le 3; $attempt++) {
     Write-Host ('== 登录（第 ' + $attempt + ' 次尝试） ==')
     $loggedIn = Login-Once
-    if ($loggedIn) { Write-Host '登录成功'; break }
+    if ($loggedIn) { Write-Host '登录成功'; Add-Progress '登录成功'; break }
     Write-Host '[警告] 登录未成功，重新尝试…'
 }
 if (-not $loggedIn) {
     Write-Host '[错误] 多次登录失败，请检查账号密码'
+    Add-Progress '登录失败'
+    Push-Progress
     exit 1
 }
 
@@ -174,6 +257,7 @@ for ($g = 0; $g -lt $groups.Count; $g++) {
         Invoke-AB @('fill', '#rateLimit', $rate)
         Invoke-AB @('fill', '#buyNum', $buy)
         Write-Host ('评论内容: ' + $comments[0])
+        Add-Progress ('创建订单: ' + $comments[0])
         Invoke-AB @('upload', '#fs1File', (Join-Path $dir 'sample.jpg'))
         Start-Sleep 4
         $null = Eval-AB $jsClickAdd
@@ -202,8 +286,7 @@ for ($g = 0; $g -lt $groups.Count; $g++) {
         $totalCreated++
     }
 
-    $rMon = Eval-AB $bMon
-    if ($rMon -match 'stopped') { Write-Host ('监控终止: ' + $rMon) }
+    $null = Invoke-MonitorRound -IsInCreate
 
     for ($i = $startIdx; $i -lt $comments.Count; $i++) {
         Write-Host ('-- 组' + ($g + 1) + ' 第 ' + ($i + 1) + ' 个订单（基于 ' + $firstId + ' 再下一单） --')
@@ -222,33 +305,51 @@ for ($g = 0; $g -lt $groups.Count; $g++) {
         Invoke-AB @('fill', '#taskRequire', $comments[$i])
         Invoke-AB @('fill', '#buyNum', $buy)
         Write-Host ('评论内容: ' + $comments[$i])
+        Add-Progress ('创建订单: ' + $comments[$i])
         $null = Eval-AB $jsClickAdd
         Start-Sleep 2
         $null = Eval-AB $jsClickOk
         $totalCreated++
-        $rMon = Eval-AB $bMon
-        if ($rMon -match 'stopped') { Write-Host ('监控终止: ' + $rMon) }
+        $null = Invoke-MonitorRound -IsInCreate
         Start-Sleep 4
     }
 }
 
 Write-Host ('本次运行完成，共创建 ' + $totalCreated + ' 个订单。')
-Write-Host '== 进入持续监控（每 10 秒轮询，发现待审=1 自动终止；要停止监控请在 Actions 页面点 Cancel） =='
+Add-Progress ('本次运行完成，共创建 ' + $totalCreated + ' 个订单')
+Write-Host '== 进入持续监控（每 10 秒轮询，待审>=1 自动终止并验证；停止监控请在 Actions 页面点 Cancel） =='
+# 切到订单列表页，确保页面上下文（getStorage/getUid 等）可用
+Invoke-AB @('open', 'https://imt.tiankongfeiji.cn/customer/order_list.html')
+Start-Sleep 4
 $mCount = 0
-$mFail = 0
+$mLoginFail = 0
 while ($true) {
     $mCount++
-    $r = Eval-AB $bMon
-    $ts = Get-Date -Format 'HH:mm:ss'
-    if ($r -match 'stopped') {
-        $mFail = 0
-        Write-Host ("[" + $ts + "] 第 " + $mCount + " 轮：发现待审=1订单并已自动终止 -> " + $r)
-    } elseif ($r -match 'scan') {
-        $mFail = 0
-        Write-Host ("[" + $ts + "] 第 " + $mCount + " 轮：无待审=1订单")
+    $res = Invoke-MonitorRound -RoundNo $mCount
+    if ($res.loginFail) {
+        $mLoginFail++
+        if ($mLoginFail -ge 3) {
+            Write-Host '[监控] 登录状态失效，尝试重新登录…'
+            $relogin = $false
+            for ($ra = 1; $ra -le 3; $ra++) {
+                $relogin = Login-Once
+                if ($relogin) { break }
+            }
+            if ($relogin) {
+                Write-Host '[监控] 重新登录成功，继续监控'
+                Add-Progress '监控: 重新登录成功'
+                $mLoginFail = 0
+                Invoke-AB @('open', 'https://imt.tiankongfeiji.cn/customer/order_list.html')
+                Start-Sleep 4
+            } else {
+                Write-Host '[错误] 登录状态已失效且重新登录失败，终止任务'
+                Add-Progress '登录状态已失效，需要重新登录'
+                Push-Progress
+                exit 1
+            }
+        }
     } else {
-        $mFail++
-        Write-Host ("[" + $ts + "] 第 " + $mCount + " 轮：接口异常")
+        $mLoginFail = 0
     }
     Start-Sleep 10
 }

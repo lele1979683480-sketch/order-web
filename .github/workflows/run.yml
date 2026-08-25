@@ -9,13 +9,13 @@ on:
       comments:
         description: '评论列表，用 | 分隔（如：评论1|评论2|评论3）'
         required: false
-  schedule:
-    - cron: '0 */2 * * *'
 
 jobs:
   run:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: write
     env:
       MY_ACCOUNT: ${{ secrets.ACCOUNT }}
       MY_PASSWORD: ${{ secrets.PASSWORD }}
