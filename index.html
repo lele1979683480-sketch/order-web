@@ -63,11 +63,47 @@ function addGroup(){
   var d = document.createElement('div');
   d.className = 'grp';
   d.innerHTML =
-    '<div class="grp-head"><b>组 ' + grpSeq + '</b><button class="del" onclick="this.parentNode.parentNode.parentNode.removeChild(this.parentNode.parentNode)">删除</button></div>' +
+    '<div class="grp-head"><b>组 ' + grpSeq + '</b><button class="del" onclick="this.parentNode.parentNode.parentNode.removeChild(this.parentNode.parentNode);saveGroups()">删除</button></div>' +
     '<label>视频号链接</label><input class="g-link" placeholder="https://weixin.qq.com/sph/xxx">' +
     '<label>评论列表（每行一条）</label><textarea class="g-comments" placeholder="评论1&#10;评论2"></textarea>' +
     '<label>初始订单 ID（可选，基于它再下一单）</label><input class="g-start" placeholder="留空则自动创建第 1 条">';
   document.getElementById('groups').appendChild(d);
+}
+// ===== 方案B：链接/评论自动保存与恢复 =====
+function saveGroups(){
+  try {
+    var groups = [];
+    var els = document.getElementById('groups').childNodes;
+    for (var i = 0; i < els.length; i++) {
+      if (els[i].nodeType !== 1) continue;
+      var g = els[i];
+      groups.push({
+        link: g.getElementsByClassName('g-link')[0].value,
+        start: g.getElementsByClassName('g-start')[0].value,
+        comments: g.getElementsByClassName('g-comments')[0].value
+      });
+    }
+    localStorage.setItem('ordertool_groups', JSON.stringify(groups));
+  } catch(e) {}
+}
+function restoreGroups(){
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem('ordertool_groups') || 'null'); } catch(e) {}
+  var container = document.getElementById('groups');
+  while (container.firstChild) container.removeChild(container.firstChild);
+  grpSeq = 0;
+  var list = (saved && saved.length) ? saved : [null];
+  for (var i = 0; i < list.length; i++) {
+    addGroup();
+    var nodes = container.childNodes;
+    var last = null;
+    for (var x = nodes.length - 1; x >= 0; x--) { if (nodes[x].nodeType === 1) { last = nodes[x]; break; } }
+    if (list[i] && last) {
+      last.getElementsByClassName('g-link')[0].value = list[i].link || '';
+      last.getElementsByClassName('g-start')[0].value = list[i].start || '';
+      last.getElementsByClassName('g-comments')[0].value = list[i].comments || '';
+    }
+  }
 }
 function cleanComment(s){
   s = s.replace(/^\s+|\s+$/g, '');
@@ -128,6 +164,7 @@ async function doSubmit(){
     L('已触发运行！开始跟踪日志…', 'ok');
     btn.innerText = '运行中…';
     document.getElementById('btnStop').style.display = 'block';
+    localStorage.setItem('ordertool_run', JSON.stringify({ repo: REPO, wf: WF, ts: Date.now() }));
     await trackRun(token);
   } catch (e) {
     L('出错：' + e.message, 'err');
@@ -144,10 +181,10 @@ async function stopRun(){
   try {
     var runs = await api('/repos/' + REPO + '/actions/runs?per_page=5');
     var list = (runs.json.workflow_runs || []).filter(function(r){ return r.name === '自动下单监控' && (r.status === 'in_progress' || r.status === 'queued'); });
-    if (!list.length) { L('当前没有正在运行的任务', 'warn'); document.getElementById('btnStop').style.display = 'none'; return; }
+    if (!list.length) { L('当前没有正在运行的任务', 'warn'); document.getElementById('btnStop').style.display = 'none'; localStorage.removeItem('ordertool_run'); return; }
     var runId = list[0].id;
     var res = await api('/repos/' + REPO + '/actions/runs/' + runId + '/cancel', 'POST');
-    if (res.status === 202 || res.status === 204) { L('已发送停止指令，正在停止…', 'warn'); }
+    if (res.status === 202 || res.status === 204) { L('已发送停止指令，正在停止…', 'warn'); localStorage.removeItem('ordertool_run'); document.getElementById('btn').disabled = false; document.getElementById('btn').innerText = '提交并运行'; }
     else { L('停止失败：' + JSON.stringify(res.json.message || res.json), 'err'); }
   } catch (e) { L('停止出错：' + e.message, 'err'); }
 }
@@ -186,12 +223,54 @@ async function trackRun(token){
     var r = await api('/repos/' + REPO + '/actions/runs/' + runId);
     var st = r.json.status || '';
     var conc = r.json.conclusion || '';
-    if (st === 'completed') { L('---- 运行结束：' + (conc || st) + ' ----', 'warn'); document.getElementById('btnStop').style.display = 'none'; break; }
-    if (k >= maxWait - 1) { L('等待超时，请稍后到 Actions 页面查看', 'warn'); document.getElementById('btnStop').style.display = 'none'; return; }
+    if (st === 'completed') {
+      L('---- 运行结束：' + (conc || st) + ' ----', 'warn');
+      document.getElementById('btnStop').style.display = 'none';
+      localStorage.removeItem('ordertool_run');
+      document.getElementById('btn').disabled = false;
+      document.getElementById('btn').innerText = '提交并运行';
+      break;
+    }
+    if (k >= maxWait - 1) {
+      L('等待超时，请稍后到 Actions 页面查看', 'warn');
+      document.getElementById('btnStop').style.display = 'none';
+      document.getElementById('btn').disabled = false;
+      document.getElementById('btn').innerText = '提交并运行';
+      return;
+    }
   }
 }
 function sleep(ms){ return new Promise(function(res){ setTimeout(res, ms); }); }
-addGroup();
+// 输入变化即自动保存（方案B）
+document.getElementById('groups').addEventListener('input', saveGroups);
+
+// ===== 方案A：运行状态自动恢复 =====
+async function restoreRun(){
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem('ordertool_run') || 'null'); } catch(e) {}
+  if (!saved || !saved.repo || saved.repo !== REPO) { return; }
+  var token = document.getElementById('token').value.trim();
+  if (!token) { return; }
+  try {
+    var runs = await api('/repos/' + REPO + '/actions/runs?per_page=3');
+    var list = (runs.json.workflow_runs || []).filter(function(r){ return r.name === '自动下单监控'; });
+    if (!list.length) { localStorage.removeItem('ordertool_run'); return; }
+    var run = list[0];
+    if (run.status === 'in_progress' || run.status === 'queued') {
+      L('检测到上次运行还在进行，已自动恢复进度显示…', 'warn');
+      document.getElementById('btn').disabled = true;
+      document.getElementById('btn').innerText = '运行中…';
+      document.getElementById('btnStop').style.display = 'block';
+      trackRun(token);
+    } else {
+      L('上次运行已结束（' + (run.conclusion || run.status) + '）', 'warn');
+      localStorage.removeItem('ordertool_run');
+    }
+  } catch(e) {}
+}
+
+restoreGroups();
+restoreRun();
 </script>
 </body>
 </html>
