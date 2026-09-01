@@ -192,23 +192,30 @@ async function stopRun(){
   if (!token) { L('请先填写 GitHub 令牌 Token', 'err'); return; }
   L('正在停止运行…', 'warn');
   try {
-    var runs = await api('/repos/' + REPO + '/actions/runs?per_page=5');
-    var list = (runs.json.workflow_runs || []).filter(function(r){ return r.name === '自动下单监控' && (r.status === 'in_progress' || r.status === 'queued'); });
-    if (!list.length) { L('当前没有正在运行的任务', 'warn'); document.getElementById('btnStop').style.display = 'none'; localStorage.removeItem('ordertool_run'); return; }
-    var runId = list[0].id;
+    var runId = '';
+    try { var s = JSON.parse(localStorage.getItem('ordertool_run') || '{}'); runId = s.runId || ''; } catch(e) {}
+    if (!runId) {
+      var runs = await api('/repos/' + REPO + '/actions/runs?per_page=5');
+      var list = (runs.json.workflow_runs || []).filter(function(r){ return r.name === '自动下单监控' && (r.status === 'in_progress' || r.status === 'queued'); });
+      if (!list.length) { L('当前没有正在运行的任务', 'warn'); document.getElementById('btnStop').style.display = 'none'; localStorage.removeItem('ordertool_run'); return; }
+      runId = list[0].id;
+    }
     var res = await api('/repos/' + REPO + '/actions/runs/' + runId + '/cancel', 'POST');
     if (res.status === 202 || res.status === 204) { L('已发送停止指令，正在停止…', 'warn'); localStorage.removeItem('ordertool_run'); document.getElementById('btn').disabled = false; document.getElementById('btn').innerText = '提交并运行'; }
     else { L('停止失败：' + JSON.stringify(res.json.message || res.json), 'err'); }
   } catch (e) { L('停止出错：' + e.message, 'err'); }
 }
 
-async function trackRun(token){
-  // 找到最新一次运行
-  var runs = await api('/repos/' + REPO + '/actions/runs?per_page=3');
-  var list = (runs.json.workflow_runs || []).filter(function(r){ return r.name === '自动下单监控'; });
-  if (!list.length) { L('未找到运行记录', 'err'); return; }
-  var run = list[0];
-  var runId = run.id;
+async function trackRun(token, runId){
+  if (!runId) {
+    // 找到最新一次运行
+    var runs = await api('/repos/' + REPO + '/actions/runs?per_page=3');
+    var list = (runs.json.workflow_runs || []).filter(function(r){ return r.name === '自动下单监控'; });
+    if (!list.length) { L('未找到运行记录', 'err'); return; }
+    runId = list[0].id;
+  }
+  // 保存运行号，供刷新后恢复停止按钮使用
+  try { var s = JSON.parse(localStorage.getItem('ordertool_run') || '{}'); s.repo = REPO; s.runId = runId; localStorage.setItem('ordertool_run', JSON.stringify(s)); } catch(e) {}
   L('运行号：' + runId + '，自动下单进行中，实时进度：', 'warn');
   var shown = 0;
   var lastSha = '';
@@ -255,23 +262,38 @@ async function restoreRun(){
   try { saved = JSON.parse(localStorage.getItem('ordertool_run') || 'null'); } catch(e) {}
   if (!saved || !saved.repo || saved.repo !== REPO) { return; }
   var token = document.getElementById('token').value.trim();
-  if (!token) { return; }
+  if (!token) { L('Token 为空：请先填入 GitHub 令牌，再刷新即可恢复停止按钮', 'warn'); return; }
+  var run = null;
   try {
-    var runs = await api('/repos/' + REPO + '/actions/runs?per_page=3');
-    var list = (runs.json.workflow_runs || []).filter(function(r){ return r.name === '自动下单监控'; });
-    if (!list.length) { localStorage.removeItem('ordertool_run'); return; }
-    var run = list[0];
+    if (saved.runId) {
+      var r0 = await api('/repos/' + REPO + '/actions/runs/' + saved.runId);
+      if (r0.status === 200) { run = r0.json; }
+    }
+    if (!run) {
+      var runs = await api('/repos/' + REPO + '/actions/runs?per_page=3');
+      if (runs.status !== 200) { L('查询云端运行失败，5 秒后自动重试…', 'warn'); setTimeout(restoreRun, 5000); return; }
+      var list = (runs.json.workflow_runs || []).filter(function(r){ return r.name === '自动下单监控'; });
+      if (list.length) { run = list[0]; }
+    }
+    if (!run) {
+      L('上次运行已结束，恢复提交界面', 'warn');
+      localStorage.removeItem('ordertool_run');
+      return;
+    }
     if (run.status === 'in_progress' || run.status === 'queued') {
       L('检测到上次运行还在进行，已自动恢复进度显示…', 'warn');
       document.getElementById('btn').disabled = true;
       document.getElementById('btn').innerText = '运行中…';
       document.getElementById('btnStop').style.display = 'block';
-      trackRun(token);
+      trackRun(token, run.id);
     } else {
       L('上次运行已结束（' + (run.conclusion || run.status) + '）', 'warn');
       localStorage.removeItem('ordertool_run');
     }
-  } catch(e) {}
+  } catch(e) {
+    L('查询运行状态失败，5 秒后自动重试…', 'warn');
+    setTimeout(restoreRun, 5000);
+  }
 }
 
 restoreGroups();
