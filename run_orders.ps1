@@ -1,4 +1,4 @@
-# 多链接批量创建 + 自动监控（GitHub Actions / Linux 版）
+﻿# 多链接批量创建 + 自动监控（GitHub Actions / Linux 版）
 # 账号密码来自环境变量 MY_ACCOUNT / MY_PASSWORD（GitHub Secrets）
 # 配置：order_config_multi.txt（===链接=== / ===评论=== / 可选 ===起始ID===）
 # 特点：接口定位起始订单（无需翻页）、接口监控所有页（待审=1 自动终止）
@@ -45,6 +45,12 @@ $password = $env:MY_PASSWORD
 $title = '复制悬赏要求内容评论'
 $rate = '150'
 $buy = '10'
+# 控件速（下单间隔）：优先读取 order_rate.txt（手机网页提交的数值），缺失则用默认 150
+$rateFile = Join-Path $dir 'order_rate.txt'
+if (Test-Path $rateFile) {
+    $rt = ([IO.File]::ReadAllText($rateFile, [Text.Encoding]::UTF8)).Trim()
+    if ($rt -match '^\d+$' -and [int]$rt -ge 1) { $rate = $rt }
+}
 
 # ---------- agent-browser 命令封装 ----------
 function Invoke-AB {
@@ -302,6 +308,8 @@ for ($g = 0; $g -lt $groups.Count; $g++) {
             if ($pageReady -match 'ready') { break }
         }
         if ($pageReady -notmatch 'ready') { Write-Host '[警告] 预填页加载超时，继续尝试…' }
+        # 关键：预填页带出的是原订单链接，必须强制覆盖为用户填的视频号链接
+        Invoke-AB @('fill', '#url', $grp.Link)
         Invoke-AB @('fill', '#taskRequire', $comments[$i])
         Invoke-AB @('fill', '#buyNum', $buy)
         Write-Host ('评论内容: ' + $comments[$i])

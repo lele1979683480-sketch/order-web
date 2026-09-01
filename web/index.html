@@ -39,6 +39,10 @@
   <div id="groups"></div>
   <button class="add" onclick="addGroup()">+ 添加一组（链接+评论）</button>
 
+  <label>下单间隔（秒）</label>
+  <input id="rate" type="number" min="1" step="1" placeholder="240">
+  <div class="note">每下一个订单之间的间隔时间，默认 240 秒</div>
+
   <button class="btn btn-run" id="btn" onclick="doSubmit()">提交并运行</button>
   <button class="btn btn-stop" id="btnStop" onclick="stopRun()" style="display:none">停止运行（终止监控）</button>
   <div class="box" id="log"></div>
@@ -49,6 +53,7 @@ var REPO = 'lele1979683480-sketch/order-web';
 var WF = 'run.yml';
 var grpSeq = 0;
 document.getElementById('token').value = localStorage.getItem('ordertool_token') || '';
+document.getElementById('rate').value = localStorage.getItem('ordertool_rate') || '240';
 
 function L(msg, cls){
   var el = document.getElementById('log');
@@ -128,6 +133,10 @@ async function doSubmit(){
   if (!token) { L('请先填写 GitHub 令牌 Token', 'err'); return; }
   localStorage.setItem('ordertool_token', token);
 
+  var rate = document.getElementById('rate').value.trim();
+  if (!/^\d+$/.test(rate) || parseInt(rate, 10) < 1) { L('下单间隔需为正整数（秒）', 'err'); return; }
+  localStorage.setItem('ordertool_rate', rate);
+
   var groups = document.getElementById('groups').childNodes;
   var parts = [];
   var gc = 0;
@@ -159,6 +168,10 @@ async function doSubmit(){
     var put = await api('/repos/' + REPO + '/contents/order_config_multi.txt', 'PUT', { message: '手机端更新配置', content: base64utf8(cfgText), sha: cur.json.sha });
     if (put.status !== 200 && put.status !== 201) { L('写入配置失败：' + JSON.stringify(put.json.message || put.json), 'err'); btn.disabled = false; btn.innerText = '提交并运行'; return; }
     L('配置已保存，正在触发运行…', 'ok');
+    // 写入下单间隔 order_rate.txt（不存在则新建）
+    var curRate = await api('/repos/' + REPO + '/contents/order_rate.txt');
+    var putRate = await api('/repos/' + REPO + '/contents/order_rate.txt', 'PUT', { message: '手机端更新下单间隔', content: base64utf8(rate), sha: (curRate.status === 200 ? curRate.json.sha : undefined) });
+    if (putRate.status !== 200 && putRate.status !== 201) { L('写入下单间隔失败：' + JSON.stringify(putRate.json.message || putRate.json), 'err'); btn.disabled = false; btn.innerText = '提交并运行'; return; }
     var disp = await api('/repos/' + REPO + '/actions/workflows/' + WF + '/dispatches', 'POST', { ref: 'main' });
     if (disp.status !== 204) { L('触发失败：' + JSON.stringify(disp.json.message || disp.json), 'err'); btn.disabled = false; btn.innerText = '提交并运行'; return; }
     L('已触发运行！开始跟踪日志…', 'ok');
@@ -199,9 +212,8 @@ async function trackRun(token){
   L('运行号：' + runId + '，自动下单进行中，实时进度：', 'warn');
   var shown = 0;
   var lastSha = '';
-  var maxWait = 30; // 最多约 5 分钟
-  for (var k = 0; k < maxWait; k++) {
-    await sleep(10000);
+  while (true) {
+    await sleep(15000);
     // 实时读取进度 progress.json
     try {
       var p = await api('/repos/' + REPO + '/contents/progress.json');
@@ -230,13 +242,6 @@ async function trackRun(token){
       document.getElementById('btn').disabled = false;
       document.getElementById('btn').innerText = '提交并运行';
       break;
-    }
-    if (k >= maxWait - 1) {
-      L('等待超时，请稍后到 Actions 页面查看', 'warn');
-      document.getElementById('btnStop').style.display = 'none';
-      document.getElementById('btn').disabled = false;
-      document.getElementById('btn').innerText = '提交并运行';
-      return;
     }
   }
 }
