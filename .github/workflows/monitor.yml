@@ -1,0 +1,33 @@
+name: 评论订单定时监控
+
+# 每 30 分钟自动跑一次：只扫描订单并自动终止待审订单，绝不创建订单
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      MY_ACCOUNT: ${{ secrets.ACCOUNT }}
+      MY_PASSWORD: ${{ secrets.PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 agent-browser
+        run: |
+          npm install -g agent-browser
+          echo "$(npm config get prefix)/node_modules/agent-browser/bin" >> $GITHUB_PATH
+
+      - name: 准备浏览器环境
+        run: |
+          echo "AGENT_BROWSER_SOCKET_DIR=$(pwd)/.ab" >> $GITHUB_ENV
+          echo "AGENT_BROWSER_HEADED=false" >> $GITHUB_ENV
+          CHROME=$(which google-chrome 2>/dev/null || which chromium 2>/dev/null || which chromium-browser 2>/dev/null)
+          if [ -n "$CHROME" ]; then echo "AGENT_BROWSER_EXECUTABLE_PATH=$CHROME" >> $GITHUB_ENV; fi
+          echo "AGENT_BROWSER_PROXY=" >> $GITHUB_ENV
+
+      - name: 运行监控（只扫描+终止，不创建订单）
+        run: pwsh -NoProfile -File monitor_only.ps1
