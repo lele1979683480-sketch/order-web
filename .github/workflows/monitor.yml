@@ -1,15 +1,21 @@
 name: 评论订单定时监控
 
-# 每 30 分钟自动跑一次：只扫描订单并自动终止待审订单，绝不创建订单
+# 长班次覆盖：每 6 小时启动一班，每班持续约 5 小时 50 分（内部每 60 秒扫一轮，发现待审即自动终止）
+# 只扫描 + 终止，绝不创建订单
 on:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
+
+# 防止两班重叠：同时用同一账号登录可能互相顶掉登录态
+concurrency:
+  group: monitor-orders
+  cancel-in-progress: false
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 355
     env:
       MY_ACCOUNT: ${{ secrets.ACCOUNT }}
       MY_PASSWORD: ${{ secrets.PASSWORD }}
